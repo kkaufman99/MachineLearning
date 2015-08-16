@@ -1,0 +1,112 @@
+---
+title: "Machine Learning Project"
+author: "Ken Kaufman"
+date: "Tuesday, August 04, 2015"
+output: html_document
+---
+
+##Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+Six participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of this study is to predict the manner in which they did the exercise by using data from the accelerometers. 
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+```{r, echo=FALSE}
+library(caret)
+library(kernlab)
+library(ggplot2)
+set.seed(32343)
+setwd("C:/Users/kwkaufma/Documents/Training/Coursera/Machine Learning")
+pml_training <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!", ""))
+pml_testing <- read.csv("pml-testing.csv", na.strings=c("NA", "#DIV/0!", ""))
+```
+
+##Data Preparation
+
+There are 19622 observations of 160 variables.  The training data set will be split, using 60% of the data for training, and 40% for evaluating our model. 
+
+```{r}
+inTrain <- createDataPartition(y=pml_training$classe,
+                              p=0.60, list=FALSE)
+training <- pml_training[inTrain,]
+testing <- pml_training[-inTrain,]
+dim(training)
+```
+
+##Preprocess Data Set
+
+Before fitting a model, we need to explore the variables and determine which ones are good candidates for predictors.  The variables that have little value in predicting will be removed from the data set.
+
+Start by removing the first 8 variables which are for bookkeeping and have no bearing on predicting the outcome.
+```{r, cache=TRUE}
+str(training[,1:7])
+training <- training[,8:160]
+```
+
+Next, look for variables where almost all values are NA, and remove them.
+```{r, cache=TRUE}
+na_test = sapply(training, function(x) {sum(is.na(x))})
+table(na_test)
+NA_cols = names(na_test[na_test>0])
+training = training[, !names(training) %in% NA_cols]
+```
+
+Next, look for near zero variance variables and remove from the training set.
+```{r, cache=TRUE}
+nzv <- nearZeroVar(training)
+if (length(nzv) > 0) {
+        training <- training[, -nzv]        
+}
+```
+
+Finally, look for highly correlated variables and remove from the training set.
+```{r, cache=TRUE}
+descrCor <-  cor(training[,-53])
+summary(descrCor[upper.tri(descrCor)])
+highlyCorDescr <- findCorrelation(descrCor, cutoff = .75)
+if (length(highlyCorDescr) > 0) {
+        training <- training[,-highlyCorDescr]
+}
+dim(training)
+```
+
+The data set now has 34 predictor variables and one outcome.
+
+## Model Fit
+
+Random Forest will be used for Model Fitting since it works well in predicting classification outcomes with more than 2 values.  It will also perform the cross validaion across many models and recommend the best.  The model and variable importance on shown below.
+
+```{r, cache=TRUE}
+# If the model file is there...
+my_model_file <- "rf_model_60pct.Rds"
+if (file.exists(my_model_file)) {
+    # Read the model in and assign it to a variable.
+        modFit <- readRDS(my_model_file)
+} else {
+    # Otherwise, run the training.
+        modFit <- train(classe ~ .,data=training,method="rf",model=FALSE)
+        saveRDS(modFit, "rf_model_60pct.Rds")
+}
+modFit
+varImp(modFit)
+```
+
+
+## Prediction
+
+Use the model to predict results of our testing data, and compare the results.  The table and plot below show the results of our prediction compared to the actual results.
+
+```{r, cache=TRUE}
+predictions <- predict(modFit,newdata=testing)
+confusionMatrix(predictions,testing$classe)
+results <- data.frame(pred = predictions, obs = testing$classe)
+p <- ggplot(results, aes(x = pred, y = obs))
+p <- p + geom_jitter(position = position_jitter(width = 0.25, height = 0.25))
+p
+```
+
+## Conclusion
+
+The accuracy rate of the chosen model is 98.4%, so we would expect our out of sample error rate to be around 1.6%.  Therefore, we should be able to predict exercise form based on accelerometer data with a high degree of accuracy using the given model.   
